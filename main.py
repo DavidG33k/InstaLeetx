@@ -7,54 +7,83 @@ import socket
 import requests
 import colorama
 import configparser
-import keyboard
 import time
 
 from colorama import Fore
 from bs4 import BeautifulSoup
 
+def show_status(leetx_status, proxy_enabled, manual_proxies, auto_proxy_enabled):
+    auto_proxies = {}
 
-def show_status(proxy_enabled, proxies):
-    leetx_status = False
-
-    if proxy_enabled:
-        for i in range(10):  # 10 tentativi per agganciare la connessione con il proxy
-            print('Tentativo connessione Proxy: ' + str(i+1) + '/10')
-            try:
-                r = requests.get('https://1337x.to/', proxies=proxies)
-                if r.status_code == 200:
-                    leetx_status = True
-                    print('\n1337x.to [' + Fore.LIGHTGREEN_EX + 'ONLINE' + Fore.RESET + ']')
-                    break
-            except:
-                pass
-
-            if i == 9:
-                print('Server Proxy non raggiungibile! Aprire il file "input-file/proxy.ini" per risolvere il problema.')
-                proxy_enabled = False
+    if proxy_enabled: # Provo a raggiungerlo con proxy manuale
+        try:
+            r = requests.get('https://1337x.to/', proxies=manual_proxies, headers=headers, timeout=10)
+            if r.status_code == 200:
+                leetx_status = True
+        except:
+            pass
 
         if not leetx_status:
-            print('1337x.to [' + Fore.LIGHTRED_EX + 'OFFLINE' + Fore.RESET + ']')
-    else:
+            proxy_enabled = False
+            print('Server Proxy non raggiungibile! Aprire il file "input-file/proxy.ini" per risolvere il problema.')
+
+    elif auto_proxy_enabled: # Provo a raggiungerlo con proxy automatico
+        list_of_proxies = getSSLProxyList()
+        
+        for proxy in list_of_proxies:
+            auto_proxies = {
+                'https': proxy,
+                'http': proxy
+            }
+        
+            print("Tentativo connessione con: " + proxy)
+
+            try:
+                r = requests.get('https://1337x.to/', proxies=auto_proxies, headers=headers, timeout=10)
+                print('Status code: ' + r.status_code)
+                if r.status_code == 200:
+                    print('Successo per ' + proxy + '\n')
+                    leetx_status = True
+                    break
+            except:
+                pass        
+                    
+        if not leetx_status:
+            auto_proxy_enabled = False
+            print(Fore.LIGHTYELLOW_EX + 'Nessun proxy attualmente funzionante.\n' + Fore.RESET)
+
+    else: # Provo a raggiungerlo senza proxy
         try:
-            if socket.gethostbyname('1337x.to') == '83.224.65.79':  # AGCOM URL
-                print('1337x.to [' + Fore.LIGHTYELLOW_EX + 'AGCOM LOCK' + Fore.RESET + ']')
-            elif requests.get('https://1337x.to/').status_code == 200:
+            if requests.get('https://1337x.to/', timeout=10).status_code == 200 and socket.gethostbyname('1337x.to') != '83.224.65.79': #AGCOM IP
                 leetx_status = True
-                print('1337x.to [' + Fore.LIGHTGREEN_EX + 'ONLINE' + Fore.RESET + ']')
-            else:
-                print('1337x.to [' + Fore.LIGHTRED_EX + 'OFFLINE' + Fore.RESET + ']')
         except:
+            pass
+
+
+
+    try:
+        if leetx_status:
+            print('1337x.to [' + Fore.LIGHTGREEN_EX + 'ONLINE' + Fore.RESET + ']')
+        elif socket.gethostbyname('1337x.to') == '83.224.65.79':  # AGCOM IP
+            print('1337x.to [' + Fore.LIGHTYELLOW_EX + 'AGCOM LOCK' + Fore.RESET + ']')
+        else:
             print('1337x.to [' + Fore.LIGHTRED_EX + 'OFFLINE' + Fore.RESET + ']')
-
-
+    except:
+        print('1337x.to [' + Fore.LIGHTRED_EX + 'OFFLINE' + Fore.RESET + ']')
 
     if proxy_enabled:
-        print('Proxy [' + Fore.LIGHTGREEN_EX + 'ABILITATO' + Fore.RESET + ']')
+        print('Proxy manuale [' + Fore.LIGHTGREEN_EX + 'ABILITATO' + Fore.RESET + ']')
     else:
-        print('Proxy [' + Fore.LIGHTRED_EX + 'DISABILITATO' + Fore.RESET + ']')
+        print('Proxy manuale [' + Fore.LIGHTRED_EX + 'DISABILITATO' + Fore.RESET + ']')
+    
+    if auto_proxy_enabled:
+        print('Proxy automatico [' + Fore.LIGHTGREEN_EX + 'ABILITATO' + Fore.RESET + ']')
+    else:
+        print('Proxy automatico [' + Fore.LIGHTRED_EX + 'DISABILITATO' + Fore.RESET + ']')
 
-    return leetx_status, proxy_enabled
+
+
+    return leetx_status, proxy_enabled, auto_proxy_enabled, auto_proxies
 
 def update_not_seen_list():
 
@@ -134,6 +163,19 @@ def get_main_torrents_data(content_page):
 
     return torrents_data
 
+def get_number_of_results(film_title):
+    pages = getAllPagesWithResults(film_title, proxy_enabled, manual_proxies, auto_proxy_enabled, auto_proxies)
+
+    number_of_results = 0
+    
+    for page in pages:
+        soup = BeautifulSoup(page.content, 'html.parser')
+        table_rows = soup.findAll("tr")
+
+        number_of_results += (len(table_rows) - 1)
+
+    return number_of_results
+
 def open_magnet(magnet):
     """Open magnet according to os."""
     if sys.platform.startswith('linux'):
@@ -187,8 +229,8 @@ def print_menu():
                    '3 - rimuovi un film dalla lista\n'
                    '4 - segna un film come visto\n'
                    '5 - scarica un film\n'
-                   '6 - abilita/disabilita Proxy\n'
-                   '  (abilita solo se 1337x.to è in AGCOM LOCK)\n'
+                   '6 - abilita/disabilita Proxy automatico\n'
+                   '7 - abilita/disabilita Proxy manuale\n'
                    '0 - ESCI\n')
     print('________________________________________________________________________________________________________________________\n')
 
@@ -202,9 +244,55 @@ def print_warnings():
           'Il sottoscritto NON si assume ,quindi, alcuna responsabilità di come questo venga utilizzato, ne per danni a cose\n'
           'o persone. Ricordo che il download di contenuti di cui non si è ufficialmente in possesso è da intendere come\n'
           'attività pirata e quindi ILLECITA!\n\n')
-    print('                                    Premi ' + Fore.LIGHTGREEN_EX + 'INVIO'+ Fore.RESET + ' per continuare!')
+    print('                          Sarai rediretto al menu tra '+ Fore.LIGHTGREEN_EX + '5' + Fore.RESET + ' secondi!')
 
+def getSSLProxyList():
+    try:
+        content_page = requests.get('https://www.sslproxies.org/').content
 
+        soup = BeautifulSoup(content_page, 'html.parser')
+
+        print(Fore.LIGHTYELLOW_EX + "Lista proxy caricata con successo!\n" + Fore.RESET)
+
+        return re.findall(r'(\d+\.\d+\.\d+\.\d+\:\d+)', str(soup))
+    except: 
+        print('Impossibile raggiungere la fonte dai cui prelevare la lista dei Proxy!')
+
+def existingPage(url):
+    page = requests.get(url, headers=headers)
+
+    soup = BeautifulSoup(page.content, 'html.parser')
+
+    if re.findall('Bad search request', str(soup)) or re.findall('No results were returned. Please refine your search', str(soup)):
+        return False
+    
+    return True
+
+def getAllPagesWithResults(film_to_search, proxy_enabled, manual_proxies, auto_proxy_enabled, auto_proxies):
+    pages = []
+
+    page_number = 1
+
+    url = ('https://1337x.to/search/' + film_to_search + '+ITA/'+ str(page_number) +'/')
+
+    while existingPage(url):
+        if proxy_enabled:
+            page = requests.get(url, headers=headers, proxies=manual_proxies) 
+        elif auto_proxy_enabled:
+            page = requests.get(url, headers=headers, proxies=auto_proxies)
+        else:
+            page = requests.get(url, headers=headers)
+
+        pages.append(page)
+
+        page_number += 1
+
+        url = ('https://1337x.to/search/' + film_to_search + '+ITA/'+ str(page_number) +'/')
+
+    return pages
+        
+        
+    
 colorama.init()
 
 config = configparser.ConfigParser()
@@ -214,13 +302,17 @@ film_non_visti = update_not_seen_list()
 
 leetx_status = False
 proxy_enabled = False
+auto_proxy_enabled = False
 
-proxies = {
+manual_proxies = {
     'https': config['DEFAULT']['PROXY'],
     'http': config['DEFAULT']['PROXY']
 }
+auto_proxies = {}
 
-headers = {'User-Agent' : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.132 Safari/537.36'}
+headers = {
+    'User-Agent' : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36'
+}
 
 clean_terminal()
 
@@ -228,13 +320,13 @@ print_logo()
 
 print_warnings()
 
-keyboard.wait('enter')
+time.sleep(5)
 
 clean_terminal()
 
 print_logo()
 
-leetx_status, proxy_enabled = show_status(proxy_enabled, proxies)
+leetx_status, proxy_enabled, auto_proxy_enabled, auto_proxies = show_status(leetx_status, proxy_enabled, manual_proxies, auto_proxy_enabled)
 
 time.sleep(1)
 
@@ -366,137 +458,121 @@ while choice != str(0):
         clean_terminal()
         print_logo()
 
-        for i, line in enumerate(film_non_visti):
-           print('%s) %s' % (i, line))
+        if leetx_status:
 
-        if len(film_non_visti) == 0:
-            print('Nessun film in lista!')
-        else:
-            index_to_search = input('\nNumero del film da scaricare: ')
+            for i, line in enumerate(film_non_visti):
+                print('%s) %s - %s' % (i, line.rstrip("\n"), Fore.LIGHTYELLOW_EX + '[Risultati: ' + str(get_number_of_results(line.rstrip("\n"))) + ']\n' + Fore.RESET))
 
-            try:
-                index_to_search = int(index_to_search)
-            except:
-                clean_terminal()
-                print_logo()
-                print('Riprova inserendo un numero!')
+            if len(film_non_visti) == 0:
+                print(Fore.LIGHTYELLOW_EX + 'Nessun film in lista!\n' + Fore.RESET)
+            else:
+                index_to_search = input('\nNumero del film da scaricare: ')
 
-            if isinstance(index_to_search, int):
-                if index_to_search != '' and int(index_to_search) < len(film_non_visti):
-                    for i, line in enumerate(film_non_visti):
-                        if i == index_to_search:
-                            if leetx_status:
-
-                                film_to_search = line.rstrip("\n")
-                                url = ('https://1337x.to/search/' + film_to_search + '+ITA/1/')
-
-                                if proxy_enabled:
-                                    for i in range(10):  # 10 tentativi per raggiungere la pagina utilizzando un server Proxy
-                                        try:
-                                            page = requests.get(url, proxies=proxies, headers=headers)
-                                            if page.status_code == 200:
-                                                clean_terminal()
-                                                print_logo()
-                                                torrents_data = get_main_torrents_data(page.content)
-
-                                                for i, line in enumerate(torrents_data[0]):
-                                                    print('%s) %s' % (i, line))
-                                                    print('         ' + Fore.LIGHTCYAN_EX + torrents_data[1][i] + '          ' + Fore.LIGHTGREEN_EX + 'S: ' + torrents_data[2][i] + '          ' + Fore.LIGHTRED_EX + 'L: ' + torrents_data[3][i] + Fore.RESET + '\n')
-
-                                                if len(torrents_data[0]) == 0:
-                                                    print('Nessun risultato per adesso :(')
-                                                else:
-                                                    torrent_chosen = input('\nNumero del torrent (lascia vuoto per tornare al menu): ')
-
-                                                    try:
-                                                        torrent_chosen = int(torrent_chosen)
-                                                    except:
-                                                        clean_terminal()
-                                                        print_logo()
-                                                        print('Riprova inserendo un numero!')
-
-                                                    if isinstance(torrent_chosen, int):
-                                                        if torrent_chosen != '' and int(torrent_chosen) < len(torrents_data[0]):
-                                                            torrent_url = ('https://1337x.to' + torrents_data[4][int(torrent_chosen)])
-
-                                                            for i in range(10):  # 10 tentativi per raggiungere la pagina del torrent utilizzando un server Proxy
-                                                                try:
-                                                                    torrent_page = requests.get(torrent_url, proxies=proxies, headers=headers)
-
-                                                                    if torrent_page.status_code == 200:
-                                                                        magnet_link = get_magnet(torrent_page.content)
-                                                                        open_magnet(magnet_link)
-                                                                        clean_terminal()
-                                                                        print_logo()
-                                                                        break
-                                                                except:
-                                                                    pass
-                                                        else:
-                                                            clean_terminal()
-                                                            print_logo()
-                                                            print('Scelta non valida!')
-
-                                                break
-                                        except:
-                                            pass
-
-                                else:
-
-                                    page = requests.get(url, headers=headers)
-
-                                    if page.status_code == 200:
-                                        clean_terminal()
-                                        print_logo()
-                                        torrents_data = get_main_torrents_data(page.content)
-
-                                        for i, line in enumerate(torrents_data[0]):
-                                            print('%s) %s' % (i, line))
-                                            print('         ' + Fore.LIGHTCYAN_EX + torrents_data[1][i] + '          ' + Fore.LIGHTGREEN_EX + 'S: ' + torrents_data[2][i] + '          ' + Fore.LIGHTRED_EX + 'L: ' + torrents_data[3][i] + Fore.RESET + '\n')
-
-                                        if len(torrents_data[0]) == 0:
-                                            print('Nessun risultato per adesso :(')
-                                        else:
-                                            torrent_chosen = input('\nNumero del torrent (lascia vuoto per tornare al menu): ')
-
-                                            try:
-                                                torrent_chosen = int(torrent_chosen)
-                                            except:
-                                                clean_terminal()
-                                                print_logo()
-                                                print('Riprova inserendo un numero!')
-
-                                            if isinstance(torrent_chosen, int):
-                                                if torrent_chosen != '' and int(torrent_chosen) < len(torrents_data[0]):
-                                                    torrent_url = ('https://1337x.to' + torrents_data[4][int(torrent_chosen)])
-                                                    torrent_page = requests.get(torrent_url, headers=headers)
-
-                                                    if torrent_page.status_code == 200:
-                                                        magnet_link = get_magnet(torrent_page.content)
-                                                        open_magnet(magnet_link)
-                                                        clean_terminal()
-                                                        print_logo()
-                                                else:
-                                                    clean_terminal()
-                                                    print_logo()
-                                                    print('Scelta non valida!')
-                            else:
-                                clean_terminal()
-                                print_logo()
-                                print('\n' + Fore.LIGHTYELLOW_EX + '1337x.to non è al momento raggiungibile!' + Fore.RESET)
-                else:
+                try:
+                    index_to_search = int(index_to_search)
+                except:
                     clean_terminal()
                     print_logo()
-                    print('Nessun film selezionato!')
+                    print(Fore.LIGHTYELLOW_EX + 'Riprova inserendo un numero!' + Fore.RESET)
 
-    # Abilita/disabilita proxy
+                if isinstance(index_to_search, int):
+                    if index_to_search != '' and int(index_to_search) < len(film_non_visti):
+                        for i, line in enumerate(film_non_visti):
+                            if i == index_to_search:
+
+                                film_to_search = line.rstrip("\n")
+
+                                page_number = 1
+
+                                url = ('https://1337x.to/search/' + film_to_search + '+ITA/'+ str(page_number) +'/')
+
+                                pages = getAllPagesWithResults(film_to_search, proxy_enabled, manual_proxies, auto_proxy_enabled, auto_proxies)
+
+                                clean_terminal()
+                                print_logo()
+
+                                torrents_data = None
+
+                                for page in pages:
+                                    page_torrents_data = get_main_torrents_data(page.content) 
+
+                                    if torrents_data is None:
+                                        torrents_data = page_torrents_data
+                                    else:
+                                        torrents_data[0] += (page_torrents_data[0])
+                                        torrents_data[1] += (page_torrents_data[1])
+                                        torrents_data[2] += (page_torrents_data[2])
+                                        torrents_data[3] += (page_torrents_data[3])
+                                        torrents_data[4] += (page_torrents_data[4])
+
+                                if torrents_data is None:
+                                    print(Fore.LIGHTYELLOW_EX+ 'Nessun risultato per adesso :(' + Fore.RESET)
+                                else:
+                                    for i, line in enumerate(torrents_data[0]):
+                                        print('%s) %s' % (i, line))
+                                        print('         ' + Fore.LIGHTCYAN_EX + torrents_data[1][i] + '          ' + Fore.LIGHTGREEN_EX + 'S: ' + torrents_data[2][i] + '          ' + Fore.LIGHTRED_EX + 'L: ' + torrents_data[3][i] + Fore.RESET + '\n')
+                                    
+                                    torrent_chosen = input('\nNumero del torrent (lascia vuoto per tornare al menu): ')
+
+                                    try:
+                                        torrent_chosen = int(torrent_chosen)
+                                    except:
+                                        clean_terminal()
+                                        print_logo()
+                                        print(Fore.LIGHTYELLOW_EX + 'Riprova inserendo un numero!' + Fore.RESET)
+
+                                    if isinstance(torrent_chosen, int):
+                                        if torrent_chosen != '' and int(torrent_chosen) < len(torrents_data[0]):
+                                            torrent_url = ('https://1337x.to' + torrents_data[4][int(torrent_chosen)])
+
+                                            if proxy_enabled:
+                                                torrent_page = requests.get(torrent_url, headers=headers, proxies=manual_proxies)
+                                            elif auto_proxy_enabled:
+                                                torrent_page = requests.get(torrent_url, headers=headers, proxies=auto_proxies)
+                                            else:
+                                                torrent_page = requests.get(torrent_url, headers=headers)
+
+                                            if torrent_page.status_code == 200:
+                                                magnet_link = get_magnet(torrent_page.content)
+                                                open_magnet(magnet_link)
+                                                clean_terminal()
+                                                print_logo()
+                                        else:
+                                            clean_terminal()
+                                            print_logo()
+                                            print(Fore.LIGHTYELLOW_EX + 'Scelta non valida!' + Fore.RESET)          
+                    else:
+                        clean_terminal()
+                        print_logo()
+                        print(Fore.LIGHTYELLOW_EX + 'Nessun film selezionato!' + Fore.RESET)
+        else:
+            clean_terminal()
+            print_logo()
+            print('\n' + Fore.LIGHTYELLOW_EX + '1337x.to non è al momento raggiungibile!' + Fore.RESET)
+
+    # Abilita/disabilita proxy automatico
     elif choice == str(6):
+        if proxy_enabled:
+            proxy_enabled = False
+
+        auto_proxy_enabled = not auto_proxy_enabled
+
+        clean_terminal()
+        print_logo()
+        leetx_status, proxy_enabled, auto_proxy_enabled, auto_proxies = show_status(leetx_status, proxy_enabled, manual_proxies, auto_proxy_enabled)
+
+    # Abilita/disabilita proxy manuale
+    elif choice == str(7):
+        if auto_proxy_enabled:
+            auto_proxy_enabled = False
+
         proxy_enabled = not proxy_enabled
 
         clean_terminal()
         print_logo()
-        leetx_status, proxy_enabled = show_status(proxy_enabled, proxies)
+        leetx_status, proxy_enabled, auto_proxy_enabled, auto_proxies = show_status(leetx_status, proxy_enabled, manual_proxies, auto_proxy_enabled)
 
-    else:
+    elif(choice is not None):
         clean_terminal()
         print_logo()
         print('Scelta non valida!')
